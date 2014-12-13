@@ -1,0 +1,9 @@
+{
+	"name": "parser",
+	"description": "PEG perser implemented by D.",
+	"copyright": "Copyright © 2014, outlandkarasu",
+	"authors": ["outlandkarasu"],
+        "license": "MIT",
+	"dependencies": {
+	}
+}
