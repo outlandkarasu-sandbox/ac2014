@@ -124,6 +124,8 @@ template str(alias S) if(isInputRange!(typeof(S))) {
     /// ditto
     bool str(R)(ref R src) if(isForwardRange!R) {
         auto before = src.save;
+        scope(failure) src = before;
+
         foreach(c; S) {
             if(src.empty || src.front != c) {
                 src = before;
@@ -251,8 +253,9 @@ unittest {
 template and(alias P) {
     /// ditto
     bool and(R)(ref R src) if(isForwardRange!R) {
-        auto s = src.save;
-        scope(exit) src = s;
+        auto before = src.save;
+        scope(exit) src = before;
+
         return P(src);
     }
 }
@@ -284,8 +287,9 @@ unittest {
 template not(alias P) {
     /// ditto
     bool not(R)(ref R src) if(isForwardRange!R) {
-        auto s = src.save;
-        scope(exit) src = s;
+        auto before = src.save;
+        scope(exit) src = before;
+
         return !P(src);
     }
 }
@@ -426,10 +430,12 @@ unittest {
  */
 template seq(P...) {
     bool seq(R)(ref R src) {
-        auto s = src.save;
+        auto before = src.save;
+        scope(failure) src = before;
+
         foreach(p; P) {
             if(!p(src)) {
-                src = s;
+                src = before;
                 return false;
             }
         }
@@ -467,7 +473,6 @@ unittest {
  */
 template sel(P...) {
     bool sel(R)(ref R src) {
-        auto s = src.save;
         foreach(p; P) {
             if(p(src)) {
                 return true;
@@ -550,5 +555,20 @@ unittest {
         auto src = s;
         assert(!digits(src) && src == s, s);
     }
+}
+
+unittest {
+    // 改行文字を認識
+    alias sel!(seq!(ch!'\r', opt!(ch!'\n')), ch!'\n') newLine;
+
+    // 改行1つの解析
+    foreach(nl; ["\r", "\n", "\r\n"] ) {
+        assert(newLine(nl) && nl.empty);
+    }
+
+    // これは2つの改行になる
+    auto s = "\n\r";
+    assert(newLine(s) && s.front == '\r');
+    assert(newLine(s) && s.empty);
 }
 
