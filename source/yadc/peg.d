@@ -55,7 +55,6 @@ unittest {
  *      現在位置がCであればtrue
  */
 template ch(alias C) {
-
     /// ditto
     bool ch(R)(ref R src) if(isInputRange!R) {
         if(!src.empty && src.front == C) {
@@ -98,6 +97,7 @@ bool end(R)(ref R src) if(isInputRange!R) {
     return src.empty;
 }
 
+///
 unittest {
     auto s = "test";
 
@@ -433,6 +433,7 @@ unittest {
  *      全て解析成功したらtrue
  */
 template seq(P...) {
+    /// ditto
     bool seq(R)(ref R src) {
         auto before = src.save;
         scope(failure) src = before;
@@ -476,6 +477,7 @@ unittest {
  *      全て解析成功したらtrue
  */
 template sel(P...) {
+    /// ditto
     bool sel(R)(ref R src) {
         foreach(p; P) {
             if(p(src)) {
@@ -486,6 +488,7 @@ template sel(P...) {
     }
 }
 
+///
 unittest {
     auto s = "test";
 
@@ -588,7 +591,7 @@ struct LineRange(R) if(isInputRange!R) {
      *      r = 内部Range
      */
     this(R r) {
-        inner_ = r;
+        inner = r;
     }
 
     /**
@@ -615,7 +618,7 @@ struct LineRange(R) if(isInputRange!R) {
      *      先頭要素
      */
     @property auto front() const {
-        return inner_.front;
+        return inner.front;
     }
 
     /**
@@ -625,14 +628,14 @@ struct LineRange(R) if(isInputRange!R) {
      *      空かどうか
      */
     @property bool empty() const {
-        return inner_.empty;
+        return inner.empty;
     }
 
     /**
      *  先頭要素を破棄する
      */
     void popFront() {
-        inner_.popFront();
+        inner.popFront();
     }
 
     static if(isForwardRange!R) {
@@ -644,19 +647,19 @@ struct LineRange(R) if(isInputRange!R) {
          */
         @property LineRange save() {
             LineRange result;
-            result.inner_ = inner_.save;
+            result.inner = inner.save;
             result.line_ = line;
             return result;
         }
     }
 
     /// その他の呼び出しは内部Rangeに任せる
-    alias inner_ this;
-
-private:
+    alias inner this;
 
     /// 内部Range
-    R inner_;
+    R inner;
+
+private:
 
     /// 行番号
     size_t line_;
@@ -733,7 +736,7 @@ struct PositionRange(R) if(isInputRange!R) {
      *      r = 内部Range
      */
     this(R r) {
-        inner_ = r;
+        inner = r;
     }
 
     /**
@@ -753,7 +756,7 @@ struct PositionRange(R) if(isInputRange!R) {
      *      先頭要素
      */
     @property auto front() const {
-        return inner_.front;
+        return inner.front;
     }
 
     /**
@@ -763,14 +766,14 @@ struct PositionRange(R) if(isInputRange!R) {
      *      空かどうか
      */
     @property bool empty() const {
-        return inner_.empty;
+        return inner.empty;
     }
 
     /**
      *  先頭要素を破棄する
      */
     void popFront() {
-        inner_.popFront();
+        inner.popFront();
 
         // 進んだ分をカウント
         ++position_;
@@ -785,19 +788,19 @@ struct PositionRange(R) if(isInputRange!R) {
          */
         @property PositionRange save() {
             PositionRange result;
-            result.inner_ = inner_.save;
+            result.inner = inner.save;
             result.position_ = position;
             return result;
         }
     }
 
     /// その他の呼び出しは内部Rangeに任せる
-    alias inner_ this;
-
-private:
+    alias inner this;
 
     /// 内部Range
-    R inner_;
+    R inner;
+
+private:
 
     /// 文字単位の位置
     size_t position_;
@@ -843,6 +846,13 @@ unittest {
     ps = ps2;
     assert(ps.position == 0);
     assert(ps.front == 't');
+
+    // 途中で失敗しても位置は0のまま
+    assert(!str!"tess"(ps));
+    assert(ps.position == 0);
+    assert(ps.front == 't');
+    assert(str!"test"(ps)); // こちらは成功
+    assert(ps.empty && ps.position == 4);
 }
 
 /// テキスト解析用の位置・行番号を保持したRange
@@ -886,5 +896,73 @@ unittest {
     assert(ts.position == 0);
     assert(ts.line == 0);
     assert(ts.front == 't');
+}
+
+/**
+ *  Params:
+ *      B = 解析開始時の処理
+ *      S = 解析成功時の処理
+ *      F = 解析失敗時の処理。Pでの例外発生時にも呼び出される。
+ *      P = 呼び出すパーサー
+ *      R = ソースの型
+ *      src = ソース
+ *  Returns:
+ *      Pの解析結果
+ */
+template action(alias B, alias S, alias F, alias P) {
+    /// ditto
+    bool action(R)(ref R src) {
+        // 解析開始
+        B(src);
+
+        // Pの呼び出し。例外発生時はFを呼んで整合性を保つ
+        bool result;
+        {
+            scope(failure) F(src);
+            result = P(src);
+        }
+
+        // 結果を見て解析成功・失敗のどちらかを呼ぶ
+        if(result) {
+            S(src);
+            return true;
+        } else {
+            F(src);
+            return false;
+        }
+    }
+}
+
+///
+unittest {
+    // アクションで変更する変数
+    bool begin = false;
+    bool success = false;
+    bool fail = false;
+
+    // リセット用
+    void reset() {
+        begin = false;
+        success = false;
+        fail = false;
+    }
+
+    // 解析開始・成功・失敗でそれぞれ変数を設定するアクション
+    alias action!(
+        (s) {begin = true;},
+        (s) {success = true;},
+        (s) {fail= true;},
+        ch!'t') p;
+
+    auto s = "test";
+
+    // 解析成功時。beginとsuccessが設定される
+    assert(p(s));
+    assert(s.front == 'e');
+    assert(begin);
+    assert(success);
+    assert(!fail);
+
+    reset();
 }
 
