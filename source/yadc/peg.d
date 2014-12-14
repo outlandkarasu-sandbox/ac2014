@@ -1,5 +1,9 @@
 module yadc.peg;
 
+import compile_time_unittest;
+
+mixin enableCompileTimeUnittest;
+
 import std.range :
     isInputRange,
     isForwardRange,
@@ -570,5 +574,150 @@ unittest {
     auto s = "\n\r";
     assert(newLine(s) && s.front == '\r');
     assert(newLine(s) && s.empty);
+}
+
+/**
+ *  行番号をカウントするRange
+ */
+struct LineRange(R) if(isInputRange!R) {
+
+    /**
+     *  内部Rangeを指定して生成する
+     *
+     *  Params:
+     *      r = 内部Range
+     */
+    this(R r) {
+        inner_ = r;
+    }
+
+    /**
+     *  行番号を返す
+     *
+     *  Returns:
+     *      現在の行番号
+     */
+    @property size_t line() @safe @nogc nothrow pure {
+        return line_;
+    }
+
+    /**
+     *  行番号をカウントする
+     */
+    void addLine() @safe @nogc nothrow {
+        ++line_;
+    }
+
+    /**
+     *  先頭要素を返す
+     *
+     *  Returns:
+     *      先頭要素
+     */
+    @property auto front() const {
+        return inner_.front;
+    }
+
+    /**
+     *  空かどうかを返す
+     *
+     *  Returns:
+     *      空かどうか
+     */
+    @property bool empty() const {
+        return inner_.empty;
+    }
+
+    /**
+     *  先頭要素を破棄する
+     */
+    void popFront() {
+        inner_.popFront();
+    }
+
+    static if(isForwardRange!R) {
+        /**
+         *  現在位置を記録する
+         *
+         *  Returns:
+         *      現在位置のRange
+         */
+        LineRange save() {
+            LineRange result;
+            result.inner_ = inner_.save;
+            result.line_ = line;
+            return result;
+        }
+    }
+
+    /// その他の呼び出しは内部Rangeに任せる
+    alias inner_ this;
+
+private:
+
+    /// 内部Range
+    R inner_;
+
+    /// 行番号
+    size_t line_;
+}
+
+/**
+ *  指定Rangeを行番号付きRangeに変換して返す
+ *
+ *  Params:
+ *      R = 行番号付きRangeに変換するRange
+ *  Returns:
+ *      行番号付きRange
+ */
+LineRange!R lineRange(R)(R r) {
+    return LineRange!R(r);
+}
+
+/**
+ *  指定パーサーが解析成功したら行番号をカウントアップする
+ *
+ *  Params:
+ *      P = 改行パーサー
+ *      R = ソースの型
+ *      src = ソース
+ *  Returns:
+ *      Pの解析結果
+ */
+template addLine(alias P) {
+    /// ditto
+    bool addLine(R)(ref LineRange!R src) {
+        if(P(src)) {
+            src.addLine();
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
+///
+unittest {
+    auto s = "\r\n";
+    auto ls = lineRange(s);
+
+    // 最初は行番号0
+    assert(ls.line == 0);
+
+    auto ls2 = ls.save;
+
+    // 行番号をカウントアップ
+    assert(addLine!(ch!'\r')(ls));
+    assert(ls.front == '\n');
+    assert(ls.line == 1);
+
+    // saveした方は変わらない
+    assert(ls2.front == '\r');
+    assert(ls2.line == 0);
+
+    // 元に戻せること
+    ls = ls2;
+    assert(ls.front == '\r');
+    assert(ls.line == 0);
 }
 
