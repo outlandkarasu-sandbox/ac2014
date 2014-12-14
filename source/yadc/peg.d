@@ -642,7 +642,7 @@ struct LineRange(R) if(isInputRange!R) {
          *  Returns:
          *      現在位置のRange
          */
-        LineRange save() {
+        @property LineRange save() {
             LineRange result;
             result.inner_ = inner_.save;
             result.line_ = line;
@@ -719,5 +719,172 @@ unittest {
     ls = ls2;
     assert(ls.front == '\r');
     assert(ls.line == 0);
+}
+
+/**
+ *  文字単位の位置を持つRange
+ */
+struct PositionRange(R) if(isInputRange!R) {
+
+    /**
+     *  内部Rangeを指定して生成する
+     *
+     *  Params:
+     *      r = 内部Range
+     */
+    this(R r) {
+        inner_ = r;
+    }
+
+    /**
+     *  文字単位の位置を返す
+     *
+     *  Returns:
+     *      文字単位の位置
+     */
+    @property size_t position() const @safe @nogc nothrow pure {
+        return position_;
+    }
+
+    /**
+     *  先頭要素を返す
+     *
+     *  Returns:
+     *      先頭要素
+     */
+    @property auto front() const {
+        return inner_.front;
+    }
+
+    /**
+     *  空かどうかを返す
+     *
+     *  Returns:
+     *      空かどうか
+     */
+    @property bool empty() const {
+        return inner_.empty;
+    }
+
+    /**
+     *  先頭要素を破棄する
+     */
+    void popFront() {
+        inner_.popFront();
+
+        // 進んだ分をカウント
+        ++position_;
+    }
+
+    static if(isForwardRange!R) {
+        /**
+         *  現在位置を記録する
+         *
+         *  Returns:
+         *      現在位置のRange
+         */
+        @property PositionRange save() {
+            PositionRange result;
+            result.inner_ = inner_.save;
+            result.position_ = position;
+            return result;
+        }
+    }
+
+    /// その他の呼び出しは内部Rangeに任せる
+    alias inner_ this;
+
+private:
+
+    /// 内部Range
+    R inner_;
+
+    /// 文字単位の位置
+    size_t position_;
+}
+
+/**
+ *  指定Rangeを位置付きRangeに変換して返す
+ *
+ *  Params:
+ *      R = 位置号付きRangeに変換するRange
+ *  Returns:
+ *      位置付きRange
+ */
+PositionRange!R positionRange(R)(R r) {
+    return PositionRange!R(r);
+}
+
+///
+unittest {
+    auto s = "test";
+    auto ps = positionRange(s);
+
+    // 最初は位置0
+    assert(ps.position == 0);
+
+    auto ps2 = ps.save;
+
+    // 1文字進めた場合
+    assert(ch!'t'(ps));
+    assert(ps.position == 1);
+    assert(ps.front == 'e');
+
+    // saveしたものは変わらない
+    assert(ps2.position == 0);
+    assert(ps2.front == 't');
+
+    // 2文字目
+    assert(ch!'e'(ps));
+    assert(ps.position == 2);
+    assert(ps.front == 's');
+
+    // 元に戻せること
+    ps = ps2;
+    assert(ps.position == 0);
+    assert(ps.front == 't');
+}
+
+/// テキスト解析用の位置・行番号を保持したRange
+alias TextRange(R) = LineRange!(PositionRange!R);
+
+/// 指定RangeをTextRangeに変換
+auto textRange(R)(R src) {
+    return TextRange!R(positionRange(src));
+}
+
+///
+unittest {
+    auto s = "test\n2test";
+    auto ts = textRange(s);
+
+    // 最初は位置0
+    assert(ts.position == 0);
+    assert(ts.line == 0);
+
+    auto ts2 = ts.save;
+
+    // testを読み込み
+    assert(str!"test"(ts));
+    assert(ts.position == 4);
+    assert(ts.line == 0);
+    assert(ts.front == '\n');
+
+    // saveしたものは変わらない
+    assert(ts2.position == 0);
+    assert(ts2.line == 0);
+    assert(ts2.front == 't');
+
+    // 改行を読み込み
+    assert(addLine!(ch!'\n')(ts));
+    assert(ts.position == 5);
+    assert(ts.line == 1);
+    assert(ts.front == '2');
+
+    // 元に戻せること
+    ts = ts2;
+    assert(ts.position == 0);
+    assert(ts.line == 0);
+    assert(ts.front == 't');
 }
 
