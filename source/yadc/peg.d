@@ -1110,3 +1110,135 @@ unittest {
     assert(node2_2.children.length == 0);
 }
 
+/**
+ *  ASTを保持したRange
+ *
+ *  Params:
+ *      R = 内部Rangeの型
+ *      T = ASTのノードタグの型
+ */
+struct ASTRange(R, T) if(isInputRange!R) {
+
+    /**
+     *  値を指定して生成する
+     *
+     *  Params:
+     *      r = 内部Range
+     *      ast = 抽象構文木
+     */
+    this(R r, AST!T ast) {
+        this.inner = r;
+        this.ast_ = ast;
+    }
+
+    static if(isForwardRange!R) {
+        /// Returns: 現在位置のRange
+        @property ASTRange save() {
+            ASTRange result;
+            result.inner = inner.save;
+            result.ast_ = ast_;
+            return result;
+        }
+    }
+
+    /// Returns: ASTオブジェクト
+    @property AST!T ast() @safe nothrow {return ast_;}
+
+    /// 内部Rangeに転送する
+    alias inner this;
+
+    /// 内部Range
+    R inner;
+
+private:
+
+    /// AST
+    AST!T ast_;
+}
+
+/**
+ *  ASTとASTRangeを生成する
+ *
+ *  Params:
+ *      T = ASTのノードのタグ型
+ *      R = 内部Rangeの型
+ *      r = ソースRange
+ *  Returns:
+ *      新しいASTを保持したASTRange
+ */
+auto astRange(T, R)(R r) {
+    return ASTRange!(TextRange!R, T)(textRange(r), new AST!T());
+}
+
+/**
+ *  ノード生成パーサー
+ *
+ *  Params:
+ *      Tag = ノードのタグの値
+ *      P = 内部パーサー
+ *      R = ソースの型
+ *      r = ソース
+ *  Returns:
+ *      解析成功しノードが生成されればtrue。
+ */
+template node(alias Tag, alias P) {
+    bool node(R)(ref ASTRange!(LineRange!(PositionRange!R), typeof(Tag)) r) {
+        // ノードの開始。例外時はバックトラック
+        r.ast.beginNode(r.position, r.line, Tag);
+        {
+            // 解析中・ノード精製中に例外が出たらバックトラック
+            scope(failure) r.ast.backtrack();
+
+            // 解析成功すればノード生成
+            if(P(r)) {
+                r.ast.endNode(r.position);
+                return true;
+            }
+        }
+
+        // 解析失敗のためバックトラック
+        r.ast.backtrack();
+        return false;
+    }
+}
+
+///
+unittest {
+    // 適当なノードの型
+    enum NodeType {
+        NODE1,
+        NODE2,
+        NODE3,
+    }
+
+    alias node!(NodeType.NODE3, str!"stt") node3;
+    alias node!(NodeType.NODE2, sel!(str!"te", str!"st")) node2;
+    alias node!(NodeType.NODE1, seq!(node2, sel!(node3, node2))) node1;
+
+    static assert(isForwardRange!(ASTRange!(string, NodeType)));
+
+    auto s = astRange!NodeType("test");
+    assert(node1(s));
+
+    // ルートノードの取得
+    auto root = s.ast.root;
+    assert(root.type == NodeType.NODE1);
+    assert(root.begin == 0);
+    assert(root.line == 0);
+    assert(root.children.length == 2);
+
+    // ノード2の取得
+    auto node2_1 = root.children[0];
+    assert(node2_1.type == NodeType.NODE2);
+    assert(node2_1.begin == 0);
+    assert(node2_1.line == 0);
+    assert(node2_1.children.length == 0);
+
+    // ノード2の取得
+    auto node2_2 = root.children[1];
+    assert(node2_2.type == NodeType.NODE2);
+    assert(node2_2.begin == 2);
+    assert(node2_2.line == 0);
+    assert(node2_2.children.length == 0);
+}
+
