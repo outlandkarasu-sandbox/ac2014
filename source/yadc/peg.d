@@ -1,6 +1,6 @@
 module yadc.peg;
 
-import compile_time_unittest;
+import compile_time_unittest : enableCompileTimeUnittest;
 
 mixin enableCompileTimeUnittest;
 
@@ -611,33 +611,6 @@ struct LineRange(R) if(isInputRange!R) {
         ++line_;
     }
 
-    /**
-     *  先頭要素を返す
-     *
-     *  Returns:
-     *      先頭要素
-     */
-    @property auto front() const {
-        return inner.front;
-    }
-
-    /**
-     *  空かどうかを返す
-     *
-     *  Returns:
-     *      空かどうか
-     */
-    @property bool empty() const {
-        return inner.empty;
-    }
-
-    /**
-     *  先頭要素を破棄する
-     */
-    void popFront() {
-        inner.popFront();
-    }
-
     static if(isForwardRange!R) {
         /**
          *  現在位置を記録する
@@ -747,26 +720,6 @@ struct PositionRange(R) if(isInputRange!R) {
      */
     @property size_t position() const @safe @nogc nothrow pure {
         return position_;
-    }
-
-    /**
-     *  先頭要素を返す
-     *
-     *  Returns:
-     *      先頭要素
-     */
-    @property auto front() const {
-        return inner.front;
-    }
-
-    /**
-     *  空かどうかを返す
-     *
-     *  Returns:
-     *      空かどうか
-     */
-    @property bool empty() const {
-        return inner.empty;
     }
 
     /**
@@ -964,5 +917,196 @@ unittest {
     assert(!fail);
 
     reset();
+}
+
+/**
+ *  抽象構文木
+ *
+ *  Params:
+ *      T = ノードのタグの型
+ */
+class AST(T) {
+
+    /// ノード
+    static immutable class Node {
+    
+        /**
+         *  位置・行番号・ノードの型を指定して生成する
+         *
+         *  Params:
+         *      begin = 開始位置
+         *      end = 終了位置
+         *      line = 行番号
+         *      type = ノードの型
+         *      childlen = 子ノード
+         */
+        this(size_t begin, size_t end, size_t line, const(T) type, immutable(Node)[] children) @safe @nogc pure nothrow {
+            this.begin_ = begin;
+            this.end_ = end;
+            this.line_ = line;
+            this.type_ = type;
+            this.children_ = children;
+        }
+    
+        /// Returns: 開始位置
+        @property size_t begin() @safe @nogc pure nothrow {return begin_;}
+    
+        /// Returns: 終了位置
+        @property size_t end() @safe @nogc pure nothrow {return end_;}
+    
+        /// Returns: 行番号
+        @property size_t line() @safe @nogc pure nothrow {return line_;}
+    
+        /// Returns: ノードの型
+        @property T type() @safe @nogc pure nothrow {return type_;}
+    
+        /// Returns: 子ノード
+        @property immutable(Node)[] children() @safe @nogc pure nothrow {return children_;}
+    
+    private:
+    
+        /// 開始位置
+        size_t begin_;
+    
+        /// 終了位置
+        size_t end_;
+    
+        /// 行番号
+        size_t line_;
+    
+        /// ノードの型
+        T type_;
+    
+        /// 子ノード
+        Node[] children_;
+    }
+
+    /**
+     *  ノードを開始する
+     *
+     *  Params:
+     *      position = 開始位置
+     *      line = 開始行
+     *      type = 開始したノード
+     */
+    void beginNode(size_t position, size_t line, T type) @safe {
+        stack_ ~= State(position, line, type, nodes_.length);
+    }
+
+    /**
+     *  最後のノードを終了する
+     *
+     *  Params:
+     *      position = 終了位置
+     */
+    void endNode(size_t position) @safe
+    in {
+        assert(stack_.length > 0);
+    } body {
+        auto state = stack_[$ - 1];
+        auto node = new immutable(Node)(state.position, position, state.line, state.type, nodes_[state.nodeCount .. $]);
+        nodes_.length = state.nodeCount;
+        nodes_ ~= node;
+        --stack_.length;
+    }
+
+    /**
+     *  最後に開始したノードを元に戻す
+     */
+    void backtrack() @safe
+    in {
+        assert(stack_.length > 0);
+    } body {
+        auto state = stack_[$ - 1];
+        nodes_.length = state.nodeCount;
+        --stack_.length;
+    }
+
+    /**
+     *  解析結果のルートノード
+     *
+     *  Returns:
+     *      解析結果のルートノード
+     */
+    ref immutable(Node) root() @safe @nogc pure
+    in {
+        // 解析終了状態であること
+        assert(stack_.length == 0 && nodes_.length == 1);
+    } body {
+        return nodes_[0];
+    }
+
+private:
+
+    /// ノードの開始状態
+    struct State {
+        size_t position;
+        size_t line;
+        T type;
+        size_t nodeCount;
+    }
+
+    /// 解析状態のスタック
+    State[] stack_;
+
+    /// 現在のノード列
+    immutable(Node)[] nodes_;
+}
+
+///
+unittest {
+    // 適当なノードの型
+    enum NodeType {
+        NODE1,
+        NODE2,
+        NODE3,
+    }
+
+    auto ast = new AST!NodeType();
+
+    // ノード1の開始
+    ast.beginNode(0, 0, NodeType.NODE1);
+
+    // ノード2の開始(ノード1の子ノード)
+    ast.beginNode(1, 0, NodeType.NODE2);
+
+    // ノード3の開始
+    ast.beginNode(3, 1, NodeType.NODE3);
+
+    // ノード3のバックトラック
+    ast.backtrack();
+
+    // ノード2の終了
+    ast.endNode(3);
+
+    // ノード2の2つ目の開始
+    ast.beginNode(4, 1, NodeType.NODE2);
+
+    // ノード2の2つ目の終了
+    ast.endNode(5);
+
+    // ノード1の終了
+    ast.endNode(5);
+
+    // ルートノードの取得
+    auto root = ast.root;
+    assert(root.type == NodeType.NODE1);
+    assert(root.begin == 0);
+    assert(root.line == 0);
+    assert(root.children.length == 2);
+
+    // ノード2の取得
+    auto node2_1 = root.children[0];
+    assert(node2_1.type == NodeType.NODE2);
+    assert(node2_1.begin == 1);
+    assert(node2_1.line == 0);
+    assert(node2_1.children.length == 0);
+
+    // ノード2の取得
+    auto node2_2 = root.children[1];
+    assert(node2_2.type == NodeType.NODE2);
+    assert(node2_2.begin == 4);
+    assert(node2_2.line == 1);
+    assert(node2_2.children.length == 0);
 }
 
