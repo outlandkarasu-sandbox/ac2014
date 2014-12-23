@@ -999,10 +999,7 @@ class AST(T) {
      *      line = 開始行
      *      type = 開始したノード
      */
-    void beginNode(size_t position, size_t line, T type) @safe
-    in {
-        assert(root_.empty);
-    } body {
+    void beginNode(size_t position, size_t line, T type) @safe {
         stack_ ~= State(position, line, type);
     }
 
@@ -1023,7 +1020,7 @@ class AST(T) {
         // スタックが空になったらルートノードと見なす
         // そうでなければ親ノードの子として追加する
         if(stack_.empty) {
-            root_ ~= node;
+            roots_ ~= node;
         } else {
             stack_[$ - 1].children ~= node;
         }
@@ -1045,8 +1042,8 @@ class AST(T) {
      *  Returns:
      *      解析結果のルートノード
      */
-    immutable(Node) root() const @safe @nogc pure {
-        return root_.empty ? null : root_[0];
+    immutable(Node)[] roots() const @safe @nogc pure {
+        return roots_;
     }
 
 private:
@@ -1063,7 +1060,7 @@ private:
     State[] stack_;
 
     /// ルートノード
-    immutable(Node)[] root_;
+    immutable(Node)[] roots_;
 }
 
 ///
@@ -1102,7 +1099,8 @@ unittest {
     ast.endNode(5);
 
     // ルートノードの取得
-    auto root = ast.root;
+    assert(ast.roots.length == 1);
+    auto root = ast.roots[0];
     assert(root.type == NodeType.NODE1);
     assert(root.begin == 0);
     assert(root.line == 0);
@@ -1234,7 +1232,7 @@ unittest {
     assert(node1(s));
 
     // ルートノードの取得
-    auto root = s.ast.root;
+    auto root = s.ast.roots[0];
     assert(root.type == NodeType.NODE1);
     assert(root.begin == 0);
     assert(root.line == 0);

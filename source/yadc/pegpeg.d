@@ -27,6 +27,9 @@ enum PegNode {
     ROOT,     /// ルートノード
 }
 
+/// PEGソースRangeの生成
+auto pegRange(R)(R r) {return astRange!(PegNode, R)(r);}
+
 /// 改行
 alias addLine!(sel!(seq!(ch!'\r', opt!(ch!'\n')), ch!'\n')) newLine;
 
@@ -196,22 +199,28 @@ unittest {
     }
 }
 
+/// 文字リテラルパーサー
+alias node!(PegNode.CHAR, charLiteral) charLiteralParser;
+
+/// 文字列リテラルパーサー
+alias node!(PegNode.STRING, stringLiteral) stringLiteralParser;
+
 /// 文字範囲
-alias seq!(ch!'[', sp, charLiteral, sp, str!"..", sp, charLiteral, sp, ch!']') rangeParser;
+alias seq!(ch!'[', sp, charLiteralParser, sp, str!"..", sp, charLiteralParser, sp, ch!']') rangeParser;
 
 ///
 unittest {
-    auto s = textRange(`['a'..'z']`);
+    auto s = pegRange(`['a'..'z']`);
     assert(rangeParser(s));
     assert(s.line == 0);
     assert(s.empty);
 
-    s = textRange(`[ 'a'  ..    'z'  ]`);
+    s = pegRange(`[ 'a'  ..    'z'  ]`);
     assert(rangeParser(s));
     assert(s.line == 0);
     assert(s.empty);
 
-    s = textRange(`[ 'a'
+    s = pegRange(`[ 'a'
             ..
             'z'  
             ]`);
@@ -219,45 +228,45 @@ unittest {
     assert(s.line == 3);
     assert(s.empty);
 
-    s = textRange(`['a'..'z'`);
+    s = pegRange(`['a'..'z'`);
     assert(!rangeParser(s));
     assert(s.position == 0);
     assert(s.front == '[');
 
-    s = textRange(`['a'.'z']`);
+    s = pegRange(`['a'.'z']`);
     assert(!rangeParser(s));
     assert(s.position == 0);
     assert(s.front == '[');
 }
 
 /// 文字集合
-alias seq!(ch!'[', sp, stringLiteral, sp, ch!']') setParser;
+alias seq!(ch!'[', sp, stringLiteralParser, sp, ch!']') setParser;
 
 ///
 unittest {
-    auto s = textRange(`["0123456789"]`);
+    auto s = pegRange(`["0123456789"]`);
     assert(setParser(s));
     assert(s.line == 0);
     assert(s.empty);
 
-    s = textRange(`[ "test"  ]`);
+    s = pegRange(`[ "test"  ]`);
     assert(setParser(s));
     assert(s.line == 0);
     assert(s.empty);
 
-    s = textRange(`[
+    s = pegRange(`[
             "test"
             ]`);
     assert(setParser(s));
     assert(s.line == 2);
     assert(s.empty);
 
-    s = textRange(`["test"`);
+    s = pegRange(`["test"`);
     assert(!setParser(s));
     assert(s.position == 0);
     assert(s.front == '[');
 
-    s = textRange(`["test]`);
+    s = pegRange(`["test]`);
     assert(!setParser(s));
     assert(s.position == 0);
     assert(s.front == '[');
@@ -266,15 +275,19 @@ unittest {
 /// 任意文字
 alias ch!'.' anyParser;
 
+/// 終端
+alias ch!'$' endParser;
+
 /// PEG識別子
 alias node!(PegNode.ID, identifier) pegIdentifier;
 
 /// PEG因子色
 alias sel!(
     pegIdentifier,
+    stringLiteralParser,
+    charLiteralParser,
     node!(PegNode.ANY, anyParser),
-    node!(PegNode.CHAR, charLiteral),
-    node!(PegNode.STRING, stringLiteral),
+    node!(PegNode.END, endParser),
     node!(PegNode.RANGE, rangeParser),
     node!(PegNode.SET, setParser),
     seq!(ch!'(', sp, pegSelect, sp, ch!')')) pegFactor;
@@ -315,7 +328,13 @@ alias node!(PegNode.DEFINE, seq!(pegIdentifier, sp, ch!'=', sp, pegSelect, sp, c
 alias node!(PegNode.ROOT, seq!(more0!(seq!(sp, pegDefine)), sp, end)) pegSource;
 
 version(unittest) {
-    /// ノードのテストを行う
+    /**
+     *  ノードのテストを行う
+     *
+     *  Params:
+     *      node = ノード
+     *      children = 期待される子ノード。子ノードが無い場合は何も指定しない。
+     */
     void assertNode(const(AST!PegNode.Node) node, PegNode[] children...) {
         assert(node.length == children.length);
         foreach(i, c; children) {
@@ -327,13 +346,13 @@ version(unittest) {
 // 定義式
 unittest {
     auto src = `a = 'a';`;
-    auto s = astRange!PegNode(src);
+    auto s = pegRange(src);
     assert(pegSource(s));
     assert(s.empty);
-    assert(s.ast.root !is null);
-    assert(s.ast.root.type == PegNode.ROOT);
+    assert(s.ast.roots.length == 1);
+    assert(s.ast.roots[0].type == PegNode.ROOT);
 
-    const root = s.ast.root;
+    const root = s.ast.roots[0];
     assertNode(root, PegNode.DEFINE);
 
     const def = root[0];
@@ -353,5 +372,119 @@ unittest {
 
     auto c = seq[0];
     assert(src[c.begin .. c.end] == `'a'`);
+}
+
+/**
+ *  PEGの構文木からD言語ソースをコンパイルする
+ *
+ *  Params:
+ *      src = ソース文字列
+ *      node = ノード
+ *  Returns:
+ *      PEGのD言語ソース
+ */
+string compilePeg(string src, const(AST!PegNode.Node) node) {
+    alias typeof(node) Node;
+
+    // ノード範囲の文字列を切り出す
+    string source(Node n) {return src[n.begin .. n.end];}
+
+    // ノードをコンパイルする
+    string compile(Node child) {return compilePeg(src, child);}
+
+    // 子ノードをコンパイルし、カンマで連結する
+    string compileChildren(Node parent, string sep) {
+        auto result = "";
+        foreach(n; parent.children) {
+            if(!result.empty) {
+                result ~= sep;
+            }
+            result ~= compile(n);
+        }
+        return result;
+    }
+
+    final switch(node.type) {
+    case PegNode.STRING:
+        return "str!(" ~ source(node) ~ ")";
+    case PegNode.CHAR:
+        return "ch!(" ~ source(node) ~ ")";
+    case PegNode.ID:
+        return source(node);
+    case PegNode.ANY:
+        return "any";
+    case PegNode.RANGE:
+        assert(node.length == 2);
+        assert(node[0].type == PegNode.CHAR);
+        assert(node[1].type == PegNode.CHAR);
+        return "rng!(" ~ source(node[0]) ~ "," ~ source(node[1]) ~ ")";
+    case PegNode.SET:
+        assert(node.length == 1);
+        assert(node[0].type == PegNode.STRING);
+        return "set!(" ~ source(node[0]) ~ ")";
+    case PegNode.END:
+        return "end";
+    case PegNode.OPTION:
+        assert(node.length == 1);
+        return "opt!(" ~ compile(node[0]) ~ ")";
+    case PegNode.AND:
+        assert(node.length == 1);
+        return "and!(" ~ compile(node[0]) ~ ")";
+    case PegNode.NOT:
+        assert(node.length == 1);
+        return "not!(" ~ compile(node[0]) ~ ")";
+    case PegNode.MORE0:
+        assert(node.length == 1);
+        return "more0!(" ~ compile(node[0]) ~ ")";
+    case PegNode.MORE1:
+        assert(node.length == 1);
+        return "more1!(" ~ compile(node[0]) ~ ")";
+    case PegNode.SELECT:
+        if(node.length == 1) {
+            return compile(node[0]);
+        } else {
+            return "sel!(" ~ compileChildren(node, ",") ~ ")";
+        }
+    case PegNode.SEQUENCE:
+        if(node.length == 1) {
+            return compile(node[0]);
+        } else {
+            return "seq!(" ~ compileChildren(node, ",") ~ ")";
+        }
+    case PegNode.DEFINE:
+        assert(node.length == 2);
+        assert(node[0].type == PegNode.ID);
+        assert(node[1].type == PegNode.SELECT);
+        return "bool " ~ source(node[0]) ~ "(R)(ref R s){return " ~ compile(node[1]) ~ "(s);}";
+    case PegNode.ROOT:
+        return compileChildren(node, "\n");
+    }
+}
+
+/**
+ *  PEGソースをD言語にコンパイルする
+ *
+ *  Params:
+ *      src = PEGソース
+ *  Returns:
+ *      D言語ソース
+ */
+string compilePeg(string src) {
+    auto s = pegRange(src);
+    if(!pegSource(s) || s.ast.roots.length < 1) {
+        throw new Exception("PEG compile error!");
+    }
+    return compilePeg(src, s.ast.roots[0]);
+}
+
+///
+unittest {
+    mixin(compilePeg(`a = "test";`));
+
+    auto src = "test";
+    assert(a(src));
+
+    src = "tes";
+    assert(!a(src));
 }
 
