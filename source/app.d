@@ -1,4 +1,6 @@
-import std.stdio;
+module app;
+
+import std.stdio : writefln;
 
 import yadc.peg;
 import yadc.pegpeg;

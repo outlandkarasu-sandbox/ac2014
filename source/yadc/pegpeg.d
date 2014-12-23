@@ -1,6 +1,7 @@
 module yadc.pegpeg;
 
-import std.array : empty;
+import std.array : array, empty;
+import std.traits : isNarrowString;
 
 import yadc.peg;
 
@@ -30,7 +31,10 @@ enum PegNode {
 }
 
 /// PEGソースRangeの生成
-auto pegSourceRange(R)(R r) {return astRange!(PegNode, R)(r);}
+auto pegSourceRange(R)(R r) if(!isNarrowString!R) {return astRange!(PegNode, R)(r);}
+
+/// ditto
+auto pegSourceRange(R)(R r) if(isNarrowString!R) {return pegSourceRange(array(r));}
 
 /// 改行
 alias addLine!(sel!(seq!(ch!'\r', opt!(ch!'\n')), ch!'\n')) newLine;
@@ -499,8 +503,7 @@ string compilePeg(T)(string src, const(AST!PegNode.Node) node) {
  *      D言語ソース
  */
 string compilePeg(T)(string src) {
-    // 文字単位での処理を抑制するため、ubyte配列にキャスト
-    auto s = pegSourceRange(cast(immutable(ubyte)[])src);
+    auto s = pegSourceRange(src);
     if(!pegSource(s) || s.ast.roots.length < 1) {
         throw new Exception("PEG compile error!");
     }
