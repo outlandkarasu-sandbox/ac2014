@@ -1,7 +1,6 @@
 module yadc.peg;
 
 import compile_time_unittest : enableCompileTimeUnittest;
-
 mixin enableCompileTimeUnittest;
 
 import std.range :
@@ -928,7 +927,7 @@ unittest {
 class AST(T) {
 
     /// ノード
-    static immutable class Node {
+    static class Node {
     
         /**
          *  位置・行番号・ノードの型を指定して生成する
@@ -940,7 +939,7 @@ class AST(T) {
          *      type = ノードの型
          *      childlen = 子ノード
          */
-        this(size_t begin, size_t end, size_t line, const(T) type, immutable(Node)[] children) @safe @nogc pure nothrow {
+        this(size_t begin, size_t end, size_t line, const(T) type, immutable(Node)[] children) immutable @safe @nogc pure nothrow {
             this.begin_ = begin;
             this.end_ = end;
             this.line_ = line;
@@ -949,19 +948,30 @@ class AST(T) {
         }
     
         /// Returns: 開始位置
-        @property size_t begin() @safe @nogc pure nothrow {return begin_;}
+        @property size_t begin() const @safe @nogc pure nothrow {return begin_;}
     
         /// Returns: 終了位置
-        @property size_t end() @safe @nogc pure nothrow {return end_;}
+        @property size_t end() const @safe @nogc pure nothrow {return end_;}
     
         /// Returns: 行番号
-        @property size_t line() @safe @nogc pure nothrow {return line_;}
+        @property size_t line() const @safe @nogc pure nothrow {return line_;}
     
         /// Returns: ノードの型
-        @property T type() @safe @nogc pure nothrow {return type_;}
+        @property T type() const @safe @nogc pure nothrow {return type_;}
     
         /// Returns: 子ノード
-        @property immutable(Node)[] children() @safe @nogc pure nothrow {return children_;}
+        @property immutable(Node)[] children() const @safe @nogc pure nothrow {return children_;}
+    
+        /// Returns: 子ノード
+        immutable(Node) opIndex(size_t i) const @safe @nogc pure nothrow
+        in {
+            assert(i < this.length);
+        } body {
+            return children_[i];
+        }
+    
+        /// Returns: 子ノード
+        @property size_t length() const @safe @nogc pure nothrow {return children_.length;}
     
     private:
     
@@ -978,7 +988,7 @@ class AST(T) {
         T type_;
     
         /// 子ノード
-        Node[] children_;
+        immutable(Node)[] children_;
     }
 
     /**
@@ -989,8 +999,11 @@ class AST(T) {
      *      line = 開始行
      *      type = 開始したノード
      */
-    void beginNode(size_t position, size_t line, T type) @safe {
-        stack_ ~= State(position, line, type, nodes_.length);
+    void beginNode(size_t position, size_t line, T type) @safe
+    in {
+        assert(root_.empty);
+    } body {
+        stack_ ~= State(position, line, type);
     }
 
     /**
@@ -1004,10 +1017,16 @@ class AST(T) {
         assert(stack_.length > 0);
     } body {
         auto state = stack_[$ - 1];
-        auto node = new immutable(Node)(state.position, position, state.line, state.type, nodes_[state.nodeCount .. $]);
-        nodes_.length = state.nodeCount;
-        nodes_ ~= node;
+        auto node = new immutable(Node)(state.position, position, state.line, state.type, state.children);
         --stack_.length;
+
+        // スタックが空になったらルートノードと見なす
+        // そうでなければ親ノードの子として追加する
+        if(stack_.empty) {
+            root_ ~= node;
+        } else {
+            stack_[$ - 1].children ~= node;
+        }
     }
 
     /**
@@ -1017,8 +1036,6 @@ class AST(T) {
     in {
         assert(stack_.length > 0);
     } body {
-        auto state = stack_[$ - 1];
-        nodes_.length = state.nodeCount;
         --stack_.length;
     }
 
@@ -1028,12 +1045,8 @@ class AST(T) {
      *  Returns:
      *      解析結果のルートノード
      */
-    ref immutable(Node) root() @safe @nogc pure
-    in {
-        // 解析終了状態であること
-        assert(stack_.length == 0 && nodes_.length == 1);
-    } body {
-        return nodes_[0];
+    immutable(Node) root() const @safe @nogc pure {
+        return root_.empty ? null : root_[0];
     }
 
 private:
@@ -1043,14 +1056,14 @@ private:
         size_t position;
         size_t line;
         T type;
-        size_t nodeCount;
+        immutable(Node)[] children;
     }
 
     /// 解析状態のスタック
     State[] stack_;
 
-    /// 現在のノード列
-    immutable(Node)[] nodes_;
+    /// ルートノード
+    immutable(Node)[] root_;
 }
 
 ///
