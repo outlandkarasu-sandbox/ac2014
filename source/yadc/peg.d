@@ -3,6 +3,7 @@ module yadc.peg;
 import compile_time_unittest : enableCompileTimeUnittest;
 mixin enableCompileTimeUnittest;
 
+import std.string : format;
 import std.range :
     isInputRange,
     isForwardRange,
@@ -972,8 +973,32 @@ class AST(T) {
     
         /// Returns: 子ノード
         @property size_t length() const @safe @nogc pure nothrow {return children_.length;}
-    
+
+        /**
+         *  文字列表現を返す
+         *
+         *  Returns:
+         *      ノードの文字列表現
+         */
+        override string toString() const @safe pure {
+            return toIndentedString(0);
+        }
+
     private:
+
+        /// インデントされた文字列表現を返す
+        string toIndentedString(size_t nest) const {
+            string result;
+            foreach(i; 0 .. nest) {
+                result ~= ' ';
+            }
+            result ~= format("%s [%d..%d](%d)\n", type_, begin_, end_, line_ + 1);
+
+            foreach(c; children_) {
+                result ~= c.toIndentedString(nest + 1);
+            }
+            return result;
+        }
     
         /// 開始位置
         size_t begin_;
